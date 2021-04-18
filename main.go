@@ -14,11 +14,13 @@ import (
 )
 
 var Tbl map[string]int
+var conn redis.Conn
 
 type response1 struct {
 	Token  string
 	Value  string
 	Expiry time.Duration
+	Keys   []string
 }
 
 func randToken() string {
@@ -44,50 +46,62 @@ func worker(id int, wg *sync.WaitGroup) {
 	fmt.Printf("Worker %d finished\n", id)
 }
 
-func Ping(c redis.Conn) error {
-	s, err := redis.String(c.Do("PING"))
-	fmt.Println(s)
-	return err
+func Basic(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	token := randToken()
+	duration := 3
+
+	res, err := Setex(conn, token, "Good Morning", duration)
+	if err != nil {
+		panic(err)
+	}
+
+	keys, err := Keys(conn)
+	if err != nil {
+		panic(err)
+	}
+
+	result := &response1{token, res, time.Duration(duration), keys}
+	data, _ := json.Marshal(result)
+	w.Write(data)
 }
 
-func Setex(c redis.Conn, key string, value string, timeMinutes int) (string, error) {
-	s, err := redis.String(c.Do("SETEX", key, timeMinutes*60, value))
-	return s, err
+func Check(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	key := chi.URLParam(r, "roomID")
+	res, err := Get(conn, key)
+	if err != nil {
+		panic(err)
+	}
+	data, err := json.Marshal(map[string]string{key: res})
+	if err != nil {
+		panic(err)
+	}
+	w.Write(data)
 }
 
 func main() {
-	conn, err := redis.Dial("tcp", ":6379")
+	var err error
+	conn, err = redis.Dial("tcp", ":6379")
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(conn)
 	defer conn.Close()
-
-	err = Ping(conn)
-	if err != nil {
-		panic(err)
-	}
 
 	const PORT = ":3000"
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
+	r.Use(middleware.RequestID)
+	r.Use(middleware.URLFormat)
 
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Hello World"))
 	})
 
-	r.Get("/json", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		token := randToken()
-		duration := 3
-		res, err := Setex(conn, token, "Good Morning", duration)
-		if err != nil {
-			panic(err)
-		}
-		result := &response1{token, res, time.Duration(duration)}
-		data, _ := json.Marshal(result)
-		w.Write(data)
-	})
+	r.Get("/json", Basic)
+
+	r.Get("/{roomID}", Check)
+
 	fmt.Println("Running on port " + PORT)
 	http.ListenAndServe(PORT, r)
 }
