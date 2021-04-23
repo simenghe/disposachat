@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+<title>Disposachat</title>
+<div>
+    <h1>Tell me why</h1>
+</div>
+
+<script>
+    var loc = window.location;
+    var uri = 'ws:';
+    if (loc.protocol === 'https:') {
+        uri = 'wss:';
+    }
+    uri += '//' + loc.host;
+    uri += loc.pathname + 'ws';
+    var ws = new WebSocket(uri)
+    ws.onopen = async function () {
+        console.log("Connected");
+    }
+    ws.onmessage = function (evt) {
+        console.log(evt.data)
+    }
+</script>
+</html>
