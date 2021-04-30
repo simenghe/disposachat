@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
 	"github.com/gomodule/redigo/redis"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -26,6 +27,9 @@ var (
 		WriteBufferSize: 1024,
 	}
 )
+
+var Clients = make(map[*websocket.Conn]bool)
+var pool = NewPool()
 
 type response1 struct {
 	Token  string
@@ -98,26 +102,68 @@ func Homepage(w http.ResponseWriter, r *http.Request) {
 	indexTemplate.Execute(w, "Nothing")
 }
 
-func Chat(w http.ResponseWriter, r *http.Request) {
-	ws, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		http.Error(w, "Websocket upgrade failed", http.StatusMethodNotAllowed)
-		return
+func Reader(ws *websocket.Conn) {
+	for {
+		_, msg, err := ws.ReadMessage()
+		if err != nil {
+			log.Println(err)
+		}
+		fmt.Println(string(msg))
 	}
-	defer ws.Close()
+}
 
+func Writer(ws *websocket.Conn) {
 	for {
 		err = ws.WriteMessage(websocket.TextMessage, []byte("Good Night!"))
 		if err != nil {
 			log.Println(err)
 		}
-
-		_, msg, err := ws.ReadMessage()
-		if err != nil {
-			log.Println(err)
-		}
-		fmt.Println(msg)
 	}
+}
+
+func Chat(w http.ResponseWriter, r *http.Request) {
+	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
+	ws, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		http.Error(w, "Websocket upgrade failed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	client := &Client{Conn: ws, Pool: pool}
+	pool.Register <- client
+	client.Read()
+}
+
+func NewChat(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	key := chi.URLParam(r, "id")
+
+	// Check the redis cache for the key
+	res, err := Get(conn, key)
+	if err != nil {
+		log.Println(err)
+		http.Error(w, "Key Error: Key expired or does not exist!", http.StatusInternalServerError)
+		return
+	}
+
+	data, err := json.Marshal(map[string]string{key: res})
+	if err != nil {
+		log.Println(err)
+		panic(err)
+	}
+
+	w.Write(data)
+}
+
+func GenerateURL(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	id := uuid.NewString()
+	res, err := Setex(conn, id, "Activated", 3)
+	if err != nil {
+		http.Error(w, "Redis SETEX error!", http.StatusInternalServerError)
+	}
+	fmt.Printf("GenerateURL : %s\n", res)
+	w.Write([]byte(id))
 }
 
 func main() {
@@ -128,6 +174,9 @@ func main() {
 	}
 	defer conn.Close()
 
+	// Setup connection pool
+	go pool.Start()
+
 	// Templates
 	indexTemplate, err = template.ParseFiles("./templates/index.html")
 	if err != nil {
@@ -135,7 +184,7 @@ func main() {
 		panic(err)
 	}
 
-	const PORT = ":3000"
+	const PORT = ":5000"
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.RequestID)
@@ -147,6 +196,8 @@ func main() {
 
 	r.Get("/", Homepage)
 	r.Get("/ws", Chat)
+	r.Get("/chat/{id}", NewChat)
+	r.Get("/generate", GenerateURL)
 	fmt.Println("Running on port " + PORT)
 	http.ListenAndServe(PORT, r)
 }

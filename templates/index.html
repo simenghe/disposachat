@@ -1,24 +1,69 @@
-<!doctype html>
+<!DOCTYPE html>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/axios/0.21.1/axios.min.js"></script>
+<style>
+  .centered {
+    text-align: center;
+  }
+</style>
 <html>
-<title>Disposachat</title>
-<div>
+  <title>Disposachat</title>
+  <div class="centered">
     <h1>Tell me why</h1>
-</div>
+    <button onclick="sendWsMessage()">I want the cane</button>
+  </div>
+  <div class="centered">
+    <h1>Generate Room</h1>
+    <button onclick="generateURL()">Generate!</button>
+    <br />
+    <a target="_blank" id="generatedurl"></a>
+  </div>
 
-<script>
+  <meta charset="utf-8" />
+
+  <script>
     var loc = window.location;
-    var uri = 'ws:';
-    if (loc.protocol === 'https:') {
-        uri = 'wss:';
+    var uri = "ws:";
+    if (loc.protocol === "https:") {
+      uri = "wss:";
     }
-    uri += '//' + loc.host;
-    uri += loc.pathname + 'ws';
-    var ws = new WebSocket(uri)
+    uri += "//" + loc.host;
+    uri += loc.pathname + "ws";
+    var ws = new WebSocket(uri);
+
     ws.onopen = async function () {
-        console.log("Connected");
+      console.log("Connected");
+    };
+
+    ws.onmessage = (evt) => {
+      console.log(evt.data);
+    };
+
+    ws.onclose = (evt) => {
+      console.log("Client closed!");
+      ws.send("Client closed!");
+    };
+
+    ws.onerror = (err) => {
+      console.log(`Socket error : ${toString(err)}`);
+    };
+
+    async function sendWsMessage() {
+      console.log("Sending message");
+      ws.send("Cane it off");
     }
-    ws.onmessage = function (evt) {
-        console.log(evt.data)
+
+    async function generateURL() {
+      const uri = window.location.toString() + "generate";
+      try {
+        const resp = await axios.get(uri);
+        const uuid = resp.data.toString();
+        console.log(uuid);
+        let link = document.getElementById("generatedurl");
+        link.innerText = `${window.location.toString()}chat/${uuid}`;
+        link.setAttribute("href", link.innerText);
+      } catch (err) {
+        console.error(err);
+      }
     }
-</script>
+  </script>
 </html>
